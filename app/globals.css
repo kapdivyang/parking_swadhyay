@@ -1,0 +1,30 @@
+@import 'tailwindcss';
+
+@theme inline {
+  --font-sans: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --font-mono: ui-monospace, 'Cascadia Mono', Menlo, monospace;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  font-family: var(--font-sans);
+}
+
+/* Number input ke spinner hata do — reg number type karte waqt dikkat karte hain */
+input[type='number']::-webkit-outer-spin-button,
+input[type='number']::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+input[type='number'] {
+  -moz-appearance: textfield;
+}
+
+/* Volunteer galti se text select karke pareshan na ho */
+button {
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+}

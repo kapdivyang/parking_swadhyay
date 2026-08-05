@@ -1,0 +1,22 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell(npx --yes supabase@latest db query *)",
+      "PowerShell(npx --yes supabase@latest db query:*)",
+      "PowerShell(npx vercel *)",
+      "PowerShell(npx vercel:*)",
+      "Bash(npx --yes supabase@latest db query *)",
+      "Bash(npx vercel *)"
+    ]
+  }
+}
+
+
+
+
+
+
+
+
+
+
