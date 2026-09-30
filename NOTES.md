@@ -67,18 +67,17 @@ Supabase database. Not yet deployed — that is the next step.
 
 ---
 
-## Migrations — 003 to 010 applied; **011 is not**
+## Migration 011 — applied
 
-**`20260806000011_vehicle_type_and_suggestions.sql` has not been run yet.**
-It adds `vehicles.vehicle_type` and `entry_suggestions()`, and the code in
-this tree needs both. Additive only — no existing row or column is touched,
-so the 1673 trial entries are unaffected:
+**`20260806000011_vehicle_type_and_suggestions.sql` is on the live database**
+(confirmed with `npx supabase migration list --linked` on 30 September 2026).
+It adds `vehicles.vehicle_type` and `entry_suggestions()`, which the code in
+this tree needs. Additive only — no existing row or column was touched.
 
-```
-npx supabase db push --linked
-```
-
-Run it **before** deploying, as always.
+The free-tier project pauses after a week idle. When it does, every CLI
+call fails with `DbConfigLoginRoleStatusError ... connection timeout`, and
+the live site is down too. Restore it from the Supabase dashboard; the
+status reads "Unhealthy" for a few minutes while it comes back.
 
 ---
 
@@ -264,7 +263,7 @@ First time on a new machine or a new project, instead:
 
 ## Before the event — do not skip
 
-- [ ] **Run migration 011** — `npx supabase db push --linked`, then deploy.
+- [x] **Run migration 011** — applied (confirmed 30 September 2026).
       Without it the entry screen has no vehicle type and no suggestions.
 - [ ] **Change `SUPER_ADMIN_PIN`.** It is still `9999`. It is now the master
       key — the one PIN that always works and can re-enable every account —
