@@ -10,6 +10,13 @@ import {
   lastSyncedAt,
   isSearchable,
 } from '@/lib/snapshot'
+import {
+  cachedSuggestions,
+  emptySuggestions,
+  refreshSuggestions,
+  type SuggestionSet,
+} from '@/lib/suggest'
+import SuggestInput from '@/app/components/suggest-input'
 
 type Result = {
   id: string
@@ -26,8 +33,6 @@ type Result = {
   block_landmark: string | null
   match_rank: number
 }
-
-type Place = { village: string; taluka: string | null }
 
 const RESULT_CAP_HINT = 200
 // Past this age the phone's copy is old enough that the operator should
@@ -46,7 +51,7 @@ export default function SearchClient() {
   const [taluka, setTaluka] = useState('')
   const [byPlace, setByPlace] = useState(false)
 
-  const [places, setPlaces] = useState<Place[]>([])
+  const [sugg, setSugg] = useState<SuggestionSet>(emptySuggestions)
   const [results, setResults] = useState<Result[]>([])
   const [searching, setSearching] = useState(false)
   const [searched, setSearched] = useState(false)
@@ -64,15 +69,16 @@ export default function SearchClient() {
   const inputRef = useRef<HTMLInputElement>(null)
   const seq = useRef(0)
 
-  // Village names already in use, to search by the same spelling they
-  // were entered with
+  // Village and taluka names already in use, so the help desk searches with
+  // the spelling the entry was actually made under — and taps it rather
+  // than guessing at it while somebody waits.
   useEffect(() => {
-    fetch('/api/villages')
-      .then((r) => (r.ok ? r.json() : null))
-      .then((j) => j && setPlaces(j.villages ?? []))
-      .catch(() => {
-        // Offline — typing the name still works
-      })
+    setSugg(cachedSuggestions())
+    let alive = true
+    refreshSuggestions().then((next) => alive && setSugg(next))
+    return () => {
+      alive = false
+    }
   }, [])
 
   // --- Keep the phone's copy current -----------------------------------
@@ -294,33 +300,29 @@ export default function SearchClient() {
             + Search by Village / Taluka
           </button>
         ) : (
-          <div className="mt-3 grid grid-cols-2 gap-2">
-            <input
+          <div className="mt-3 space-y-2">
+            <SuggestInput
               value={village}
-              onChange={(e) => setVillage(e.target.value)}
-              list="search-village-list"
+              onChange={setVillage}
+              onPick={(s) => {
+                setVillage(s.value)
+                // The taluka narrows a big village search, and the one this
+                // village is usually entered with is the one meant. Only
+                // filled when it is empty — an operator who typed a taluka
+                // deliberately is not overruled.
+                if (s.pair && !taluka.trim()) setTaluka(s.pair)
+              }}
+              suggestions={sugg.village}
               placeholder="Village"
-              autoComplete="off"
               className="w-full rounded-xl bg-white px-4 py-3 text-lg outline-none"
             />
-            <input
+            <SuggestInput
               value={taluka}
-              onChange={(e) => setTaluka(e.target.value)}
-              list="search-taluka-list"
+              onChange={setTaluka}
+              suggestions={sugg.taluka}
               placeholder="Taluka"
-              autoComplete="off"
               className="w-full rounded-xl bg-white px-4 py-3 text-lg outline-none"
             />
-            <datalist id="search-village-list">
-              {places.map((p) => (
-                <option key={`${p.village}|${p.taluka ?? ''}`} value={p.village} />
-              ))}
-            </datalist>
-            <datalist id="search-taluka-list">
-              {[...new Set(places.map((p) => p.taluka).filter(Boolean))].map((t) => (
-                <option key={t as string} value={t as string} />
-              ))}
-            </datalist>
           </div>
         )}
 

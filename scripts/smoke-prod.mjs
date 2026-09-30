@@ -61,7 +61,8 @@ csv.headers.get('content-disposition')?.includes('attachment')
   ? ok(`export downloads as ${csv.headers.get('content-disposition').match(/filename="([^"]+)"/)?.[1]}`)
   : fail('export is not an attachment')
 const head = (await csv.text()).split('\r\n')
-head[0].includes('entry_no') && head[0].includes('landmark') ? ok('CSV header correct') : fail(`header: ${head[0]}`)
+head[0].includes('entry_no') && head[0].includes('landmark') && head[0].includes('vehicle_type')
+  ? ok('CSV header correct') : fail(`header: ${head[0]}`)
 head.length - 2 === 1673 ? ok(`CSV streamed all ${head.length - 2} rows`) : fail(`CSV has ${head.length - 2} rows`)
 
 // --- the new screen renders ------------------------------------------

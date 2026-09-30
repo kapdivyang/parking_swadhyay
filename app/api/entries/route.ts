@@ -14,7 +14,7 @@ const PAGE = 100
 const MAX_PAGE = 500
 
 const SELECT =
-  'id, entry_no, reg_no_display, owner_name, owner_phone, village, taluka, landmark, entered_at, updated_at, block_id, blocks(name)'
+  'id, entry_no, reg_no_display, owner_name, owner_phone, village, taluka, landmark, vehicle_type, entered_at, updated_at, block_id, blocks(name)'
 
 export async function GET(req: Request) {
   const session = await getSession()

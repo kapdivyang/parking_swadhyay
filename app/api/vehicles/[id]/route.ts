@@ -77,14 +77,15 @@ export async function PATCH(req: Request, { params }: Ctx) {
   }
 
   if (body.owner_name !== undefined) {
-    patch.owner_name = String(body.owner_name).trim() || null
+    patch.owner_name = String(body.owner_name ?? '').trim() || null
   }
   if (body.owner_phone !== undefined) {
-    patch.owner_phone = normalizePhone(String(body.owner_phone)) || null
+    patch.owner_phone = normalizePhone(String(body.owner_phone ?? '')) || null
   }
-  if (body.village !== undefined) patch.village = cleanPlace(String(body.village))
-  if (body.taluka !== undefined) patch.taluka = cleanPlace(String(body.taluka))
-  if (body.landmark !== undefined) patch.landmark = cleanPlace(String(body.landmark))
+  if (body.village !== undefined) patch.village = cleanPlace(String(body.village ?? ''))
+  if (body.taluka !== undefined) patch.taluka = cleanPlace(String(body.taluka ?? ''))
+  if (body.landmark !== undefined) patch.landmark = cleanPlace(String(body.landmark ?? ''))
+  if (body.vehicle_type !== undefined) patch.vehicle_type = cleanPlace(String(body.vehicle_type ?? ''))
 
   if (Object.keys(patch).length === 0) {
     return NextResponse.json({ error: 'Nothing to change' }, { status: 400 })
@@ -94,7 +95,7 @@ export async function PATCH(req: Request, { params }: Ctx) {
     .from('vehicles')
     .update(patch)
     .eq('id', id)
-    .select('id, entry_no, reg_no_display, owner_name, owner_phone, village, taluka, landmark, entered_at, updated_at, block_id')
+    .select('id, entry_no, reg_no_display, owner_name, owner_phone, village, taluka, landmark, vehicle_type, entered_at, updated_at, block_id')
     .single()
 
   if (error) {

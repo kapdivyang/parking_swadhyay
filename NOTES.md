@@ -40,8 +40,18 @@ Supabase database. Not yet deployed — that is the next step.
   operator can search with whatever the visitor actually remembers.
 - **Sticky village** — like the block, the last village/taluka stays filled in
   between entries, since vehicles arrive village by village
-- **Shared spellings** — the entry and search screens both suggest villages
-  already entered, so "Sihor" and "sihore" do not split one village in two
+- **Shared spellings, and far less typing** — village, taluka, landmark and
+  vehicle type all suggest what has already been entered, by anyone, on any
+  phone. Commonest first, and the list opens on tapping the field, before a
+  single letter: the usual entry is now a tap rather than a word. It also
+  keeps "Sihor" and "sihore" from splitting one village in two. The lists
+  are cached on the device, so they work with no signal, and a value used
+  here is suggested here from the very next entry — no sync needed
+- **Vehicle type** — optional, on the entry itself: car, bike, tractor.
+  Free text with the commonest few as one-tap chips, not a fixed list; a
+  vehicle nobody listed in advance must never be a reason an entry cannot
+  be made. Sticky between entries like the village, since a block is
+  usually one kind of vehicle. Included in the CSV export
 - **Entry numbers** — 1, 2, 3… inside each block, handed out by the database.
   Searchable as `#7`, and shown on every search result
 - **Landmark per entry** — "near light tower 4". The block says which field to
@@ -54,6 +64,21 @@ Supabase database. Not yet deployed — that is the next step.
   Refreshed every 60 seconds with only what changed (~2 KB)
 - **Service worker** — `/entry`, `/search` and `/entries` open with no network
   (HTTPS only, so it activates after deploy, not on localhost over http)
+
+---
+
+## Migrations — 003 to 010 applied; **011 is not**
+
+**`20260806000011_vehicle_type_and_suggestions.sql` has not been run yet.**
+It adds `vehicles.vehicle_type` and `entry_suggestions()`, and the code in
+this tree needs both. Additive only — no existing row or column is touched,
+so the 1673 trial entries are unaffected:
+
+```
+npx supabase db push --linked
+```
+
+Run it **before** deploying, as always.
 
 ---
 
@@ -201,22 +226,46 @@ the ordinary entry PIN — the server checks the role, not just the screen.
 
 ---
 
-## Next step: deploy
+## Deploying
 
-1. `npm i -g vercel` then `vercel login`
-2. `vercel` — link the project
+The project is already linked (`.vercel/`) and the env vars are already
+set, so a release is one command:
+
+```
+npx vercel --prod
+```
+
+**`npx`, not a bare `vercel`.** The CLI is a devDependency of this repo,
+not a global install — a plain `vercel --prod` gives
+"'vercel' is not recognized", which looks like a broken machine and is
+only a missing prefix.
+
+Two things worth remembering:
+
+- **The SQL goes first, always.** Deploying code that reads a column the
+  database does not have leaves the live site erroring for everyone. See
+  the migrations section above.
+- **A deploy alone changes nothing on a phone that is already open.** The
+  service worker serves the cached screen until the next navigation, so
+  check on a phone that has been closed and reopened.
+
+First time on a new machine or a new project, instead:
+
+1. `npx vercel login`
+2. `npx vercel` — link the project
 3. Set env vars in the Vercel dashboard (Settings → Environment Variables):
    - `NEXT_PUBLIC_SUPABASE_URL`
    - `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`
    - `SUPABASE_SECRET_KEY`
-   - `APP_PIN`
    - `SUPER_ADMIN_PIN`
-4. `vercel --prod`
+4. `npx vercel --prod`
 
 ---
 
 ## Before the event — do not skip
 
+- [ ] **Run migration 011** — `npx supabase db push --linked`, then deploy.
+      Without it the entry screen has no vehicle type and no suggestions.
 - [ ] **Change `SUPER_ADMIN_PIN`.** It is still `9999`. It is now the master
       key — the one PIN that always works and can re-enable every account —
       so it must not stay at a guessable default. Vercel dashboard; no
@@ -317,6 +366,12 @@ trial: at exit time no search touches the network at all.
 - `supabase/009-changed-at-for-delta-sync.sql` — the column the offline
   snapshot pages through
 - `supabase/010-user-accounts.sql` — accounts, per-block access, login throttling
+- `supabase/migrations/20260806000011_vehicle_type_and_suggestions.sql` —
+  `vehicles.vehicle_type`, and `entry_suggestions()` behind every suggested field
+- `lib/suggest.ts` — the suggestion lists: cached on the device, merged with
+  what this phone has just used, and matched as the operator types
+- `app/components/suggest-input.tsx` — the field itself. Not `<datalist>`,
+  and the comment at the top says why
 - `NETWORK.md` — the crowd/network problem, analysed; option A now built
 - `lib/auth.ts` — accounts, signed sessions, the block fence, rate limiting
 - `lib/users.ts` — what makes a valid account (shared by create and edit)

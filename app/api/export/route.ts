@@ -23,6 +23,7 @@ const COLUMNS = [
   'village',
   'taluka',
   'landmark',
+  'vehicle_type',
   'status',
   'entered_at_ist',
   'entered_at_utc',
@@ -40,6 +41,7 @@ type Row = {
   village: string | null
   taluka: string | null
   landmark: string | null
+  vehicle_type: string | null
   status: string
   entered_at: string
   updated_at: string | null
@@ -90,7 +92,7 @@ export async function GET(req: Request) {
           let q = supabaseAdmin
             .from('vehicles')
             .select(
-              'id, entry_no, reg_no_display, owner_name, owner_phone, village, taluka, landmark, status, entered_at, updated_at, device_id, block_id',
+              'id, entry_no, reg_no_display, owner_name, owner_phone, village, taluka, landmark, vehicle_type, status, entered_at, updated_at, device_id, block_id',
             )
             .order('block_id', { ascending: true })
             .order('entry_no', { ascending: true })
@@ -114,6 +116,7 @@ export async function GET(req: Request) {
                   r.village,
                   r.taluka,
                   r.landmark,
+                  r.vehicle_type,
                   r.status,
                   ist(r.entered_at),
                   r.entered_at,

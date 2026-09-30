@@ -11,6 +11,7 @@ type IncomingEntry = {
   village?: unknown
   taluka?: unknown
   landmark?: unknown
+  vehicle_type?: unknown
   client_uuid?: unknown
   device_id?: unknown
   entered_at?: unknown
@@ -25,6 +26,7 @@ type PreparedRow = {
   village: string | null
   taluka: string | null
   landmark: string | null
+  vehicle_type: string | null
   client_uuid: string
   device_id: string | null
   entered_at: string
@@ -73,6 +75,10 @@ function prepare(e: IncomingEntry, session: Session): { row?: PreparedRow; error
       taluka: cleanPlace(String(e.taluka ?? '')),
       // "Near light tower 4" — where the car is standing inside the block
       landmark: cleanPlace(String(e.landmark ?? '')),
+      // Car, bike, tractor… Tidied exactly like the places are, and for
+      // the same reason: it is suggested back to the next operator, and
+      // "Bike " must not become a second kind of vehicle.
+      vehicle_type: cleanPlace(String(e.vehicle_type ?? '')),
       // The entry's own id from the device — a resend will not duplicate it
       client_uuid: String(e.client_uuid ?? '') || crypto.randomUUID(),
       device_id: String(e.device_id ?? '') || null,

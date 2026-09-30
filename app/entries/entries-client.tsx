@@ -2,6 +2,14 @@
 
 import { useCallback, useEffect, useState } from 'react'
 import Link from 'next/link'
+import {
+  cachedSuggestions,
+  emptySuggestions,
+  refreshSuggestions,
+  type SuggestField,
+  type SuggestionSet,
+} from '@/lib/suggest'
+import SuggestInput from '@/app/components/suggest-input'
 
 type Entry = {
   id: string
@@ -12,6 +20,7 @@ type Entry = {
   village: string | null
   taluka: string | null
   landmark: string | null
+  vehicle_type: string | null
   entered_at: string
   updated_at: string | null
   block_id: string
@@ -48,6 +57,20 @@ export default function EntriesClient({
   const [error, setError] = useState('')
 
   const [open, setOpen] = useState<Entry | null>(null)
+
+  // Corrections get the same suggestions the entry screen has. A correction
+  // is usually a spelling being brought into line with everyone else's, so
+  // offering the spellings everyone else used is the whole job.
+  const [sugg, setSugg] = useState<SuggestionSet>(emptySuggestions)
+
+  useEffect(() => {
+    setSugg(cachedSuggestions())
+    let alive = true
+    refreshSuggestions().then((next) => alive && setSugg(next))
+    return () => {
+      alive = false
+    }
+  }, [])
 
   // --- Which block is this account looking at --------------------------
   // The account decides, not the device. The server enforces the same
@@ -241,6 +264,7 @@ export default function EntriesClient({
         <EntrySheet
           entry={open}
           canDelete={isSuper}
+          suggestions={sugg}
           onClose={() => setOpen(null)}
           onChanged={afterChange}
         />
@@ -273,25 +297,39 @@ type Draft = {
   village: string
   taluka: string
   landmark: string
+  vehicle_type: string
 }
 
-const FIELDS: { key: keyof Draft; label: string; mono?: boolean; numeric?: boolean }[] = [
+// `suggest` names the shared list this field draws on. The vehicle number,
+// name and mobile deliberately have none: they belong to one vehicle and
+// one person, and a field that offered somebody else's back would be an
+// invitation to save the wrong one.
+const FIELDS: {
+  key: keyof Draft
+  label: string
+  mono?: boolean
+  numeric?: boolean
+  suggest?: SuggestField
+}[] = [
   { key: 'reg_no_display', label: 'Vehicle number', mono: true },
   { key: 'owner_name', label: 'Name' },
   { key: 'owner_phone', label: 'Mobile', numeric: true },
-  { key: 'village', label: 'Village' },
-  { key: 'taluka', label: 'Taluka' },
-  { key: 'landmark', label: 'Landmark' },
+  { key: 'village', label: 'Village', suggest: 'village' },
+  { key: 'taluka', label: 'Taluka', suggest: 'taluka' },
+  { key: 'landmark', label: 'Landmark', suggest: 'landmark' },
+  { key: 'vehicle_type', label: 'Vehicle type', suggest: 'vehicle_type' },
 ]
 
 function EntrySheet({
   entry,
   canDelete,
+  suggestions,
   onClose,
   onChanged,
 }: {
   entry: Entry
   canDelete: boolean
+  suggestions: SuggestionSet
   onClose: () => void
   onChanged: (updated: Entry | null, id: string) => void
 }) {
@@ -302,6 +340,7 @@ function EntrySheet({
     village: entry.village ?? '',
     taluka: entry.taluka ?? '',
     landmark: entry.landmark ?? '',
+    vehicle_type: entry.vehicle_type ?? '',
   })
   const [confirming, setConfirming] = useState(false)
   const [deleting, setDeleting] = useState(false)
@@ -334,6 +373,7 @@ function EntrySheet({
           village: draft.village,
           taluka: draft.taluka,
           landmark: draft.landmark,
+          vehicle_type: draft.vehicle_type,
         }),
       })
       const json = await res.json()
@@ -479,21 +519,31 @@ function EntrySheet({
               {FIELDS.map((f) => (
                 <label key={f.key} className="block">
                   <span className="mb-1 block text-sm font-medium text-slate-500">{f.label}</span>
-                  <input
-                    value={draft[f.key]}
-                    onChange={(ev) =>
-                      setDraft((d) => ({
-                        ...d,
-                        [f.key]: f.mono ? ev.target.value.toUpperCase() : ev.target.value,
-                      }))
-                    }
-                    inputMode={f.numeric ? 'numeric' : undefined}
-                    autoComplete="off"
-                    spellCheck={false}
-                    className={`w-full rounded-xl border-2 border-slate-300 bg-white px-4 py-3 text-lg outline-none focus:border-blue-600 ${
-                      f.mono ? 'font-mono font-bold' : ''
-                    }`}
-                  />
+                  {f.suggest ? (
+                    <SuggestInput
+                      value={draft[f.key]}
+                      onChange={(v) => setDraft((d) => ({ ...d, [f.key]: v }))}
+                      suggestions={suggestions[f.suggest]}
+                      autoCapitalize={f.suggest === 'landmark' ? 'none' : 'words'}
+                      className="w-full rounded-xl border-2 border-slate-300 bg-white px-4 py-3 text-lg outline-none focus:border-blue-600"
+                    />
+                  ) : (
+                    <input
+                      value={draft[f.key]}
+                      onChange={(ev) =>
+                        setDraft((d) => ({
+                          ...d,
+                          [f.key]: f.mono ? ev.target.value.toUpperCase() : ev.target.value,
+                        }))
+                      }
+                      inputMode={f.numeric ? 'numeric' : undefined}
+                      autoComplete="off"
+                      spellCheck={false}
+                      className={`w-full rounded-xl border-2 border-slate-300 bg-white px-4 py-3 text-lg outline-none focus:border-blue-600 ${
+                        f.mono ? 'font-mono font-bold' : ''
+                      }`}
+                    />
+                  )}
                 </label>
               ))}
             </div>

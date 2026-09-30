@@ -16,6 +16,16 @@ import {
   type QueuedEntry,
 } from '@/lib/queue'
 import { isPlausibleReg, normalizePhone, normalizeReg } from '@/lib/reg'
+import {
+  cachedSuggestions,
+  clearSuggestions,
+  emptySuggestions,
+  pairFor,
+  refreshSuggestions,
+  rememberSuggestions,
+  type SuggestionSet,
+} from '@/lib/suggest'
+import SuggestInput from '@/app/components/suggest-input'
 
 type Block = {
   id: string
@@ -27,8 +37,6 @@ type Block = {
   fill_percent: number
 }
 
-type Place = { village: string; taluka: string | null }
-
 // Vehicles arrive village by village, so the last one entered is almost
 // always the next one too. Kept on the device like the block is.
 const PLACE_KEY = 'parking_last_place'
@@ -36,8 +44,15 @@ const PLACE_KEY = 'parking_last_place'
 // the landmark changes far less often than the vehicle does. Kept the
 // same way, and cleared by hand when they move.
 const LANDMARK_KEY = 'parking_last_landmark'
+// A block is usually one kind of vehicle — cars in one field, bikes in
+// another — so this changes even less often than the landmark does.
+const VTYPE_KEY = 'parking_last_vehicle_type'
 // The last "Start Fresh" this device knows about
 const EPOCH_KEY = 'parking_data_epoch'
+// How often the suggestion list is refreshed. Villages arrive in waves and
+// a new one only has to reach the other phones within a few minutes; the
+// value this phone just used is added locally and instantly regardless.
+const SUGGEST_EVERY_MS = 5 * 60 * 1000
 
 /**
  * @param fixedBlockId the block this account is tied to, from the signed
@@ -57,7 +72,11 @@ export default function EntryClient({ fixedBlockId }: { fixedBlockId: string | n
   const [village, setVillage] = useState('')
   const [taluka, setTaluka] = useState('')
   const [landmark, setLandmark] = useState('')
-  const [places, setPlaces] = useState<Place[]>([])
+  const [vehicleType, setVehicleType] = useState('')
+  // Everything already entered for these fields, by anyone. Starts as the
+  // copy this phone saved last time, so suggestions are there from the
+  // first paint and with no signal at all.
+  const [sugg, setSugg] = useState<SuggestionSet>(emptySuggestions)
   const [showOptional, setShowOptional] = useState(false)
 
   const [saved, setSaved] = useState<QueuedEntry[]>([])
@@ -93,6 +112,11 @@ export default function EntryClient({ fixedBlockId }: { fixedBlockId: string | n
 
       if (epoch && seen && epoch !== seen) {
         await clearAll()
+        // The suggestions go with them. The server's list is now empty, and
+        // offering landmarks from a layout that has just been cleared would
+        // read as though the reset had not worked.
+        clearSuggestions()
+        setSugg(emptySuggestions())
         setSaved([])
         setRefused([])
         setPending(0)
@@ -129,7 +153,7 @@ export default function EntryClient({ fixedBlockId }: { fixedBlockId: string | n
     const place = localStorage.getItem(PLACE_KEY)
     if (place) {
       try {
-        const p = JSON.parse(place) as Place
+        const p = JSON.parse(place) as { village?: string; taluka?: string }
         setVillage(p.village ?? '')
         setTaluka(p.taluka ?? '')
       } catch {
@@ -138,16 +162,28 @@ export default function EntryClient({ fixedBlockId }: { fixedBlockId: string | n
     }
 
     setLandmark(localStorage.getItem(LANDMARK_KEY) ?? '')
+    setVehicleType(localStorage.getItem(VTYPE_KEY) ?? '')
   }, [loadBlocks, fixedBlockId])
 
-  // Suggestions so a village is spelled the same on every phone
+  // What everyone has already entered, so a village is spelled the same on
+  // every phone — and, far more to the point on a phone, so it is tapped
+  // rather than typed.
   useEffect(() => {
-    fetch('/api/villages')
-      .then((r) => (r.ok ? r.json() : null))
-      .then((j) => j && setPlaces(j.villages ?? []))
-      .catch(() => {
-        // Offline — typing still works, only the suggestions are missing
-      })
+    // The device's own copy first: instant, and the whole answer offline
+    setSugg(cachedSuggestions())
+
+    let alive = true
+    const pull = async () => {
+      const next = await refreshSuggestions()
+      if (alive) setSugg(next)
+    }
+    pull()
+
+    const timer = setInterval(pull, SUGGEST_EVERY_MS)
+    return () => {
+      alive = false
+      clearInterval(timer)
+    }
   }, [])
 
   // Remember the block on this device so it is never asked again
@@ -267,6 +303,7 @@ export default function EntryClient({ fixedBlockId }: { fixedBlockId: string | n
     const vill = village.trim()
     const tal = taluka.trim()
     const mark = landmark.trim()
+    const vtype = vehicleType.trim()
 
     const queued = await enqueue({
       reg_no: reg,
@@ -277,6 +314,7 @@ export default function EntryClient({ fixedBlockId }: { fixedBlockId: string | n
       village: vill || null,
       taluka: tal || null,
       landmark: mark || null,
+      vehicle_type: vtype || null,
       device_id: deviceId(),
       entered_at: new Date().toISOString(),
     })
@@ -285,6 +323,14 @@ export default function EntryClient({ fixedBlockId }: { fixedBlockId: string | n
       localStorage.setItem(PLACE_KEY, JSON.stringify({ village: vill, taluka: tal }))
     }
     if (mark) localStorage.setItem(LANDMARK_KEY, mark)
+    if (vtype) localStorage.setItem(VTYPE_KEY, vtype)
+
+    // Suggest these back on this phone from the very next entry. Waiting
+    // for the sync and the five-minute refresh would mean typing a new
+    // village out in full two or three times over — and offline, forever.
+    setSugg(
+      rememberSuggestions({ village: vill, taluka: tal, landmark: mark, vehicle_type: vtype }, tal),
+    )
 
     lastSave.current = queued.client_uuid
     setFlash({ text: `${norm} saved`, kind: 'ok' })
@@ -469,6 +515,35 @@ export default function EntryClient({ fixedBlockId }: { fixedBlockId: string | n
             className="w-full rounded-2xl border-2 border-slate-300 bg-white px-5 py-6 text-center font-mono text-3xl font-bold tracking-wider outline-none focus:border-blue-600"
           />
 
+          {/* What kind of vehicle this is. A block is usually one kind —
+              cars in one field, bikes in another — so it stays filled in
+              like the village does, and the commonest few are offered as
+              chips: one tap, and the keyboard never opens. */}
+          <div className="mt-3 rounded-xl border border-slate-200 bg-white p-3">
+            <div className="mb-2 flex items-center justify-between">
+              <span className="text-sm font-medium text-slate-500">Vehicle type (optional)</span>
+              {vehicleType && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setVehicleType('')
+                    localStorage.removeItem(VTYPE_KEY)
+                  }}
+                  className="text-sm text-blue-600"
+                >
+                  Clear
+                </button>
+              )}
+            </div>
+            <SuggestInput
+              value={vehicleType}
+              onChange={setVehicleType}
+              suggestions={sugg.vehicle_type}
+              placeholder="Car / Bike / Tractor"
+              quick={4}
+            />
+          </div>
+
           {/* Village and taluka stay filled between entries, so a whole
               village can be entered without retyping it every time. */}
           <div className="mt-3 rounded-xl border border-slate-200 bg-white p-3">
@@ -491,47 +566,37 @@ export default function EntryClient({ fixedBlockId }: { fixedBlockId: string | n
               )}
             </div>
 
-            <div className="grid grid-cols-2 gap-2">
-              <input
+            {/* Stacked, not side by side. Each field carries its own
+                suggestion list, and a half-width list on a 360px phone is
+                a row of truncated village names — which is exactly the
+                thing that has to be readable at a glance. */}
+            <div className="space-y-2">
+              <SuggestInput
                 value={village}
-                onChange={(e) => {
-                  const v = e.target.value
+                onChange={(v) => {
                   setVillage(v)
                   // Fill the taluka in while the village is still being
                   // typed — never on blur. Filling it as the operator moves
                   // into the field would put text under their finger, and
                   // the next keystroke would land on the end of it.
                   if (taluka.trim()) return
-                  const hit = places.find(
-                    (p) => p.village.toLowerCase() === v.trim().toLowerCase(),
-                  )
-                  if (hit?.taluka) setTaluka(hit.taluka)
+                  const known = pairFor(sugg.village, v)
+                  if (known) setTaluka(known)
                 }}
-                list="village-list"
+                onPick={(s) => {
+                  setVillage(s.value)
+                  if (s.pair && !taluka.trim()) setTaluka(s.pair)
+                }}
+                suggestions={sugg.village}
                 placeholder="Village"
-                autoComplete="off"
-                className="w-full rounded-lg border-2 border-slate-300 px-3 py-3 text-lg outline-none focus:border-blue-600"
               />
-              <input
+              <SuggestInput
                 value={taluka}
-                onChange={(e) => setTaluka(e.target.value)}
-                list="taluka-list"
+                onChange={setTaluka}
+                suggestions={sugg.taluka}
                 placeholder="Taluka"
-                autoComplete="off"
-                className="w-full rounded-lg border-2 border-slate-300 px-3 py-3 text-lg outline-none focus:border-blue-600"
               />
             </div>
-
-            <datalist id="village-list">
-              {places.map((p) => (
-                <option key={`${p.village}|${p.taluka ?? ''}`} value={p.village} />
-              ))}
-            </datalist>
-            <datalist id="taluka-list">
-              {[...new Set(places.map((p) => p.taluka).filter(Boolean))].map((t) => (
-                <option key={t as string} value={t as string} />
-              ))}
-            </datalist>
 
             {village && (
               <p className="mt-2 text-sm text-slate-500">
@@ -560,12 +625,12 @@ export default function EntryClient({ fixedBlockId }: { fixedBlockId: string | n
                   </button>
                 )}
               </div>
-              <input
+              <SuggestInput
                 value={landmark}
-                onChange={(e) => setLandmark(e.target.value)}
+                onChange={setLandmark}
+                suggestions={sugg.landmark}
                 placeholder="e.g. near light tower 4"
-                autoComplete="off"
-                className="w-full rounded-lg border-2 border-slate-300 px-3 py-3 text-lg outline-none focus:border-blue-600"
+                autoCapitalize="none"
               />
               {landmark && (
                 <p className="mt-2 text-sm text-slate-500">

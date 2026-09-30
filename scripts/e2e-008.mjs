@@ -57,7 +57,7 @@ try {
       entries: [{
         reg_no: PLATE, block_id: block.id, owner_name: 'E2E Test',
         owner_phone: '9000000000', village: 'Testgam', taluka: 'Testtaluka',
-        landmark: 'near light tower 4',
+        landmark: 'near light tower 4', vehicle_type: 'E2E Tractor',
         client_uuid: crypto.randomUUID(), device_id: 'e2e',
         entered_at: new Date().toISOString(),
       }],
@@ -69,9 +69,20 @@ try {
     ? ok(`entry saved, trigger assigned #${num} (was ${c0.last_no})`)
     : fail(`expected #${c0.last_no + 1}, got ${JSON.stringify(saved.assigned)}`)
 
-  const { data: made } = await db.from('vehicles').select('id, landmark, entry_no').eq('reg_no', PLATE).single()
+  const { data: made } = await db.from('vehicles').select('id, landmark, vehicle_type, entry_no').eq('reg_no', PLATE).single()
   id = made.id
   made.landmark === 'near light tower 4' ? ok('landmark stored') : fail(`landmark is ${made.landmark}`)
+  made.vehicle_type === 'E2E Tractor' ? ok('vehicle type stored') : fail(`vehicle_type is ${made.vehicle_type}`)
+
+  // The value just entered has to come back as a suggestion, or the entry
+  // screen offers nothing and every operator types every village in full.
+  const sug = await (await fetch(`${BASE}/api/suggestions`, { headers: H })).json()
+  sug.suggestions?.vehicle_type?.some((s) => s.value === 'E2E Tractor')
+    ? ok('/api/suggestions offers the vehicle type back')
+    : fail(`vehicle type not suggested: ${JSON.stringify(sug.suggestions?.vehicle_type?.slice(0, 3))}`)
+  sug.suggestions?.village?.some((s) => s.value === 'Testgam' && s.pair === 'Testtaluka')
+    ? ok('/api/suggestions pairs the village with its taluka')
+    : fail('village/taluka pair missing from suggestions')
 
   // --- 2. it shows up in the block-wise list -------------------------
   const list = await (await fetch(`${BASE}/api/entries?block_id=${block.id}&q=${made.entry_no}`, { headers: H })).json()
@@ -87,11 +98,16 @@ try {
   // --- 4. edit -------------------------------------------------------
   const patch = await fetch(`${BASE}/api/vehicles/${id}`, {
     method: 'PATCH', headers: H,
-    body: JSON.stringify({ block_id: block.id, owner_name: 'E2E Edited', landmark: 'near gate 7' }),
+    body: JSON.stringify({
+      block_id: block.id, owner_name: 'E2E Edited',
+      landmark: 'near gate 7', vehicle_type: 'E2E Tempo',
+    }),
   })
   const edited = await patch.json()
   edited.vehicle?.owner_name === 'E2E Edited' && edited.vehicle?.landmark === 'near gate 7'
     ? ok('edit saved') : fail(`edit failed: ${JSON.stringify(edited)}`)
+  edited.vehicle?.vehicle_type === 'E2E Tempo'
+    ? ok('vehicle type edited') : fail(`vehicle_type is ${edited.vehicle?.vehicle_type}`)
   edited.vehicle?.updated_at ? ok('updated_at stamped by trigger') : fail('updated_at not set')
   edited.vehicle?.entry_no === made.entry_no ? ok('entry number unchanged by edit') : fail('entry number moved')
 
@@ -123,8 +139,8 @@ try {
   bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf
     ? ok('CSV starts with a BOM (Excel-safe)')
     : fail(`CSV has no BOM — starts with ${bytes.slice(0, 3)}`)
-  lines[0].includes('entry_no') && lines[0].includes('landmark')
-    ? ok('CSV header has entry_no and landmark') : fail(`CSV header: ${lines[0]}`)
+  lines[0].includes('entry_no') && lines[0].includes('landmark') && lines[0].includes('vehicle_type')
+    ? ok('CSV header has entry_no, landmark and vehicle_type') : fail(`CSV header: ${lines[0]}`)
   lines.some((l) => l.includes(PLATE)) ? ok(`CSV streamed ${lines.length - 1} rows for ${block.name}`) : fail('CSV missing the test row')
 } finally {
   // --- cleanup: leave nothing behind ---------------------------------

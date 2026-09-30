@@ -151,6 +151,14 @@ create table if not exists vehicles (
   -- car is, which is what the visitor actually needs at exit time.
   landmark       text,
 
+  -- Car, bike, tractor… Optional, and free text on purpose: blocks carry a
+  -- checked vehicle_type because the Super Admin sets a handful of them by
+  -- hand, but this one is typed at the gate a hundred thousand times and
+  -- will meet vehicles nobody listed in advance. A refused entry with a
+  -- car waiting is worse than a spelling tidied up afterwards — and
+  -- entry_suggestions() keeps the spellings together anyway.
+  vehicle_type   text,
+
   status         text not null default 'parked'
                    check (status in ('parked','exited')),
 
@@ -208,6 +216,8 @@ create index if not exists vehicles_village_lower_idx on vehicles (lower(village
 create index if not exists vehicles_taluka_lower_idx  on vehicles (lower(taluka));
 -- Landmark, searched the same tolerant way village is
 create index if not exists vehicles_landmark_trgm_idx on vehicles using gin (lower(landmark) gin_trgm_ops);
+-- Vehicle type — grouped case-insensitively by entry_suggestions()
+create index if not exists vehicles_vehicle_type_lower_idx on vehicles (lower(vehicle_type));
 -- Live dashboard counts
 create index if not exists vehicles_block_parked_idx on vehicles (block_id) where status = 'parked';
 create index if not exists vehicles_entered_at_idx   on vehicles (entered_at desc);
@@ -518,8 +528,96 @@ as $$
 $$;
 
 
--- Villages already entered, so the entry form can suggest them and the
--- spelling stays consistent across a hundred different phones.
+-- ============================================================
+--  entry_suggestions()
+--
+--  Everything anybody has already typed into village, taluka, landmark or
+--  vehicle type, most-used first. The entry screen offers it back, so a
+--  village is spelled out in full by the first person to meet it and
+--  tapped by everybody after them — which is most of the typing on the
+--  screen, and all of it done one-handed on a phone.
+--
+--    field  — 'village' | 'taluka' | 'landmark' | 'vehicle_type'
+--    value  — the spelling to offer back
+--    pair   — for a village, the taluka it usually belongs to
+--    uses   — how many entries carry it
+-- ============================================================
+-- Short column names inside, and every reference qualified. `returns
+-- table` makes field/value/pair/uses into output parameters, and a bare
+-- `value` in the body would then be two things at once.
+create or replace function entry_suggestions()
+returns table (field text, value text, pair text, uses bigint)
+language sql
+stable
+as $$
+  with vals as (
+    select 'village'::text          as f,
+           trim(x.village)          as v,
+           nullif(trim(x.taluka), '') as p
+      from vehicles x
+     where coalesce(trim(x.village), '') <> ''
+    union all
+    select 'taluka', trim(x.taluka), null
+      from vehicles x
+     where coalesce(trim(x.taluka), '') <> ''
+    union all
+    select 'landmark', trim(x.landmark), null
+      from vehicles x
+     where coalesce(trim(x.landmark), '') <> ''
+    union all
+    select 'vehicle_type', trim(x.vehicle_type), null
+      from vehicles x
+     where coalesce(trim(x.vehicle_type), '') <> ''
+  ),
+  -- Counted per exact spelling first, so the variant offered back is the
+  -- one most people actually typed...
+  exact as (
+    select s.f, s.v, count(*) as n from vals s group by s.f, s.v
+  ),
+  -- ...then collapsed case-insensitively, so "Savli" and "savli" are one
+  -- suggestion carrying both counts rather than two half-used ones. The
+  -- cast is load-bearing: sum() over bigint returns numeric, and the
+  -- declared return type is not.
+  grouped as (
+    select e.f, lower(e.v) as k, sum(e.n)::bigint as n from exact e group by e.f, lower(e.v)
+  ),
+  -- Which spelling to offer back: use decides, and on a tie the
+  -- capitalised form wins. Every value is tied on the first morning, and
+  -- "car" sitting next to "Bike" reads as a bug in the app.
+  best as (
+    select distinct on (e.f, lower(e.v)) e.f, lower(e.v) as k, e.v
+      from exact e
+     order by e.f, lower(e.v), e.n desc, (left(e.v, 1) = upper(left(e.v, 1))) desc, e.v
+  ),
+  pair_counts as (
+    select lower(s.v) as k, s.p, count(*) as n
+      from vals s
+     where s.f = 'village' and s.p is not null
+     group by lower(s.v), s.p
+  ),
+  best_pair as (
+    select distinct on (c.k) c.k, c.p from pair_counts c order by c.k, c.n desc, c.p
+  ),
+  -- Capped per field, not overall: one limit on the end would silently
+  -- drop whichever field happened to sort last.
+  ranked as (
+    select g.f, b.v, bp.p, g.n,
+           row_number() over (partition by g.f order by g.n desc, b.v) as rn
+      from grouped g
+      join best b            on b.f = g.f and b.k = g.k
+      left join best_pair bp on g.f = 'village' and bp.k = g.k
+  )
+  select r.f, r.v, r.p, r.n
+    from ranked r
+   where r.rn <= 500
+   order by r.f, r.n desc, r.v;
+$$;
+
+
+-- Villages already entered. Superseded by entry_suggestions() above, which
+-- covers all four suggested fields and orders them by use. Left in place
+-- rather than dropped: nothing reads it any more, and a drop is the one
+-- change here that could not be undone by re-running this file.
 create or replace function village_suggestions()
 returns table (village text, taluka text)
 language sql
@@ -566,6 +664,7 @@ grant execute on function reset_all_data()                  to service_role;
 grant execute on function data_epoch()                      to service_role;
 grant execute on function search_vehicles(text, text, text) to service_role;
 grant execute on function village_suggestions()             to service_role;
+grant execute on function entry_suggestions()               to service_role;
 grant execute on function delete_vehicle(uuid, text)        to service_role;
 
 alter table block_counters    enable row level security;

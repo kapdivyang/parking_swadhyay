@@ -18,6 +18,9 @@ export type QueuedEntry = {
   taluka: string | null
   // Where inside the block the vehicle is standing — "near light tower 4"
   landmark: string | null
+  // Car, bike, tractor… Free text, suggested from what has been entered
+  // before rather than picked from a fixed list.
+  vehicle_type: string | null
   device_id: string
   entered_at: string
   synced: boolean
@@ -212,6 +215,7 @@ export async function syncNow(): Promise<{ sent: number; refused: number; failed
           village: e.village ?? null,
           taluka: e.taluka ?? null,
           landmark: e.landmark ?? null,
+          vehicle_type: e.vehicle_type ?? null,
           client_uuid: e.client_uuid,
           device_id: e.device_id,
           entered_at: e.entered_at,
